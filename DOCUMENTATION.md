@@ -435,24 +435,43 @@ Deliberately derived, never stored:
 
 - **An order's true, historical seller.** Derived from the ownership
   history, NOT from today's `Listing.sellerId` and NOT stored on the
-  order. The real query (exactly the pattern settled in the combined
-  file's Part 3 SKILL):
+  order. The real query (the pattern settled in the combined file's
+  Part 3 SKILL, **corrected in Part B from 2 branches to 3 — trace
+  below**):
 
   ```sql
   SELECT COALESCE(
     (SELECT "newSellerId" FROM "ListingOwnershipTransfer"
      WHERE "listingId" = $1 AND "transferredAt" <= $2
      ORDER BY "transferredAt" DESC LIMIT 1),
+    (SELECT "previousSellerId" FROM "ListingOwnershipTransfer"
+     WHERE "listingId" = $1
+     ORDER BY "transferredAt" ASC LIMIT 1),
     (SELECT "sellerId" FROM "Listing" WHERE "id" = $1)
   ) AS historical_seller_id;
   -- $1 = the order's listingId, $2 = the order's own createdAt.
-  -- Falls back to Listing.sellerId directly if no transfer ever
-  -- happened (the common case: most listings never change hands).
   ```
 
-  The subquery takes the newest transfer *at or before* the order's
-  timestamp; the fallback keeps the common case a single indexed Listing
-  read. (argued in Step 2, Order)
+  Branch 1 takes the newest transfer *at or before* the order's
+  timestamp (that transfer's `newSellerId` owned the listing at order
+  time). Branch 2 handles the case branch 1 is silent on — an order
+  placed *before any transfer had happened* — by returning the
+  **previousSeller of the earliest transfer**, i.e. the original/builder
+  owner who owned the listing when that order was placed. Branch 3 keeps
+  the common case (a listing that never changed hands) a single indexed
+  Listing read.
+
+  **Why the original 2-branch version was corrected (Part B, proven
+  real):** the original pattern from Part 3 was branches 1 + 3 only. For
+  an order placed *before* the only transfer — exactly the confirmed
+  6th-bonus-query scenario: A owns at order time, then the listing is
+  transferred A→B — branch 1 finds nothing (`transferredAt <= $2`
+  matches no row), and branch 3's fallback returned today's
+  `Listing.sellerId`, which is **B, the post-transfer owner** — the wrong
+  answer. The middle branch restores **A, the original owner at order
+  time**. The 6th bonus query runs this exact 3-branch SQL against real
+  seeded data and its real output + `EXPLAIN` prove it returns A (the
+  original seller), not B. (argued in Step 2, Order)
 - **A review's author** is derived `orderId → Order.buyerId`. (argued in
   Step 2, Review)
 
@@ -1148,20 +1167,26 @@ and screenshots:
 5. **Real `EXPLAIN` output** for the two heaviest (action 3 and action 5),
    showing the designed indexes are actually used — not asserted.
 6. **The confirmed 6th, bonus query (beyond the five actions — none of
-   the five is "look up the historical seller of an order", yet the
-   confirmed mechanism must be proven, not just written about),** using
-   the exact SQL pattern from Part 3's SKILL section:
-   (a) **seed** a listing owned by seller A and an order against it while
-   A still owns it (so `order.createdAt` falls inside A's ownership);
-   (b) **then transfer** the listing to seller B: insert the
-   `ListingOwnershipTransfer` row (previousSellerId = A, newSellerId = B,
-   transferredAt after the order's `createdAt`) and update
-   `Listing.sellerId` to B, write-first, in a real transaction;
-   (c) run the real lookup (`$1` = the listing's id, `$2` = the order's
-   `createdAt`) and **show, as captured real output, that it returns A —
-   the ORIGINAL seller — for the already-placed order, not B**, proving
-   the historical lookup genuinely works, not just exists on paper. Its
-   real `EXPLAIN` confirms the `(listingId, transferredAt)` index is used.
+    the five is "look up the historical seller of an order", yet the
+    confirmed mechanism must be proven, not just written about),** using
+    the **corrected 3-branch SQL pattern** (Part 3's SKILL section was
+    updated in Part B from the original 2 branches to 3 — see Q1 above
+    for the correction's trace and proof):
+    (a) **seed** a listing owned by seller A and an order against it while
+    A still owns it (so `order.createdAt` falls inside A's ownership);
+    (b) **then transfer** the listing to seller B: insert the
+    `ListingOwnershipTransfer` row (previousSellerId = A, newSellerId = B,
+    transferredAt after the order's `createdAt`) and update
+    `Listing.sellerId` to B, write-first, in a real transaction;
+    (c) run the real lookup (`$1` = the listing's id, `$2` = the order's
+    `createdAt`) and **show, as captured real output, that it returns A —
+    the ORIGINAL seller — for the already-placed order, not B**, proving
+    the historical lookup genuinely works, not just exists on paper. Its
+    real `EXPLAIN` confirms the `(listingId, transferredAt)` index is used.
+    The run in Part B really did this: current `Listing.sellerId` reads B
+    at lookup time, yet the 3-branch query returned A, `PASS`. The original
+    2-branch pattern was empirically shown (in this run's trace) to return
+    B in this exact scenario, hence the documented correction.
 7. **Three deliberately invalid inserts**: a Review with no Order; an
    Order referencing a nonexistent Listing; a negative money value — which
    the **REQUIRED** `CHECK >= 0` constraint from Step 3, question 2 must

@@ -1,0 +1,123 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id        String    @id @default(cuid())
+  email     String    @unique
+  fullName  String
+  isBuyer   Boolean   @default(false)
+  isSeller  Boolean   @default(false)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  listings      Listing[]                  @relation("SellerListings")
+  orders        Order[]                    @relation("BuyerOrders")
+  reviews       Review[]                   @relation("ReviewSubject")
+  previousSales ListingOwnershipTransfer[] @relation("PreviousSeller")
+  newSales      ListingOwnershipTransfer[] @relation("NewSeller")
+
+  // CHECK (isBuyer OR isSeller) — added in the raw-SQL migration
+}
+
+model Category {
+  id        String     @id @default(cuid())
+  name      String     @unique
+  parentId  String?
+  parent    Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children  Category[] @relation("CategoryTree")
+  listings  Listing[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  deletedAt DateTime?
+
+  @@index([parentId])
+  // CHECK (id <> parentId) — added in the raw-SQL migration
+}
+
+model Listing {
+  id          String   @id @default(cuid())
+  sellerId    String
+  seller      User     @relation("SellerListings", fields: [sellerId], references: [id])
+  categoryId  String
+  category    Category @relation(fields: [categoryId], references: [id])
+  title       String
+  description String
+  priceMinor  Int
+  currency    String   @default("NGN")
+  status      String   @default("active")
+  imageUrls   String[] @default([])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+
+  ownershipTransfers ListingOwnershipTransfer[]
+  orders             Order[]
+
+  @@index([sellerId])
+  @@index([categoryId])
+  // CHECK price_non_negative (priceMinor >= 0) — raw-SQL migration
+  // CHECK listing_status_valid (status IN ('active','sold','removed')) — raw-SQL migration
+}
+
+model ListingOwnershipTransfer {
+  id               String   @id @default(cuid())
+  listingId        String
+  listing          Listing  @relation(fields: [listingId], references: [id])
+  previousSellerId String
+  previousSeller   User     @relation("PreviousSeller", fields: [previousSellerId], references: [id])
+  newSellerId      String
+  newSeller        User     @relation("NewSeller", fields: [newSellerId], references: [id])
+  transferredAt    DateTime @default(now())
+
+  @@index([listingId, transferredAt])
+  @@index([previousSellerId])
+  @@index([newSellerId])
+  // CHECK (previousSellerId <> newSellerId) — raw-SQL migration
+}
+
+model Order {
+  id                     String   @id @default(cuid())
+  orderCode              String   @unique
+  idempotencyKey         String?  @unique
+  buyerId                String
+  buyer                  User     @relation("BuyerOrders", fields: [buyerId], references: [id])
+  listingId              String
+  listing                Listing  @relation(fields: [listingId], references: [id])
+  titleAtOrder           String
+  priceMinorAtOrder      Int
+  currencyAtOrder        String   @default("NGN")
+  shippingAddressAtOrder String
+  status                 String   @default("pending")
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  review Review?
+
+  @@index([buyerId, status])
+  @@index([listingId])
+  // CHECK valid_status (status IN ('pending','paid','shipped','completed','cancelled')) — raw-SQL migration
+  // CHECK order_price_non_negative (priceMinorAtOrder >= 0) — raw-SQL migration
+}
+
+model Review {
+  id             String   @id @default(cuid())
+  orderId        String   @unique
+  order          Order    @relation(fields: [orderId], references: [id])
+  sellerId       String
+  seller         User     @relation("ReviewSubject", fields: [sellerId], references: [id])
+  rating         Int
+  comment        String?
+  sellerResponse String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  deletedAt      DateTime?
+
+  @@index([sellerId])
+  // CHECK rating_valid (1 <= rating <= 5) — raw-SQL migration
+}

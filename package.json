@@ -1,0 +1,23 @@
+{
+  "name": "eke-market-day",
+  "version": "0.2.0",
+  "private": true,
+  "description": "EKE (market day) marketplace data model — Part B proof of the model",
+  "license": "UNLICENSED",
+  "prisma": {
+    "seed": "node prisma/seed.js"
+  },
+  "scripts": {
+    "db:up": "docker compose up -d",
+    "db:migrate": "prisma migrate dev",
+    "db:seed": "prisma db seed"
+  },
+  "devDependencies": {
+    "prisma": "7.10.0"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.10.0",
+    "@prisma/client": "7.10.0",
+    "dotenv": "^18.0.3"
+  }
+}

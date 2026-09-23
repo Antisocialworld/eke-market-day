@@ -1,0 +1,13 @@
+# dependencies
+node_modules/
+
+# env — real credentials only ever live in .env, created by hand, gitignored
+.env
+
+# logs
+*.log
+npm-debug.log*
+
+# os
+.DS_Store
+Thumbs.db

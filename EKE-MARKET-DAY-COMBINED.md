@@ -318,11 +318,28 @@ SELECT COALESCE(
   (SELECT "newSellerId" FROM "ListingOwnershipTransfer"
    WHERE "listingId" = $1 AND "transferredAt" <= $2
    ORDER BY "transferredAt" DESC LIMIT 1),
+  (SELECT "previousSellerId" FROM "ListingOwnershipTransfer"
+   WHERE "listingId" = $1
+   ORDER BY "transferredAt" ASC LIMIT 1),
   (SELECT "sellerId" FROM "Listing" WHERE "id" = $1)
 ) AS historical_seller_id;
 -- $1 = the order's listingId, $2 = the order's own createdAt.
--- Falls back to Listing.sellerId directly if no transfer ever
--- happened (the common case: most listings never change hands).
+-- Branch 1: the newest transfer at-or-before the order — its newSeller
+--   owned the listing at order time.
+-- Branch 2 (CORRECTED, added 2026-09-23 in Part B): if no transfer had
+--   happened by order time, the owner who PRECEDED the first transfer —
+--   the previousSeller of the earliest transfer — is the true owner at
+--   order time (the original/builder owner).
+-- Branch 3: fallback, Listing.sellerId directly if no transfer ever
+--   happened (the common case: most listings never change hands).
+-- REASON THE ORIGINAL 2-BRANCH VERSION WAS WRONG AND WAS CORRECTED:
+-- the old version was exactly the first + third branch above. For an order
+-- placed BEFORE the only transfer (the confirmed bonus scenario), branch 1
+-- finds nothing (transferredAt <= createdAt matches no row) and it fell
+-- through to today's Listing.sellerId — the POST-transfer owner B — instead
+-- of the true, original owner A at order time. The middle branch restores
+-- A: the owner who built the listing / owned it before the first recorded
+-- transfer. Proven by the 6th bonus query's real output and EXPLAIN.
 ```
 
 ### Category — self-referential tree (a distinct real pattern)
